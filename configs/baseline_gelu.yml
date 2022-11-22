@@ -1,0 +1,22 @@
+model:
+  pretrained: false
+  arch: hg2
+  activation: gelu
+  norm: batch
+  weight_std: False
+
+  num_stacks: 2
+  num_blocks: 1
+  num_classes: 16
+
+optimizer:
+  optimizer: rmsprop
+  lr: !!float 1e-3
+  epochs: 30
+  momentum: 0
+  eps: !!float 1e-8
+  weight_decay: !!float 0
+
+scheduler:
+  T_max: 3000000
+  eta_min: !!float 1e-6
