@@ -19,19 +19,38 @@ model_urls = {
 }
 
 
+class Conv2d_WS(nn.Conv2d):
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True):
+        super().__init__(in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, groups, bias)
+
+    def forward(self, x):
+        # return super(Conv2d, self).forward(x)
+        weight = self.weight
+        weight_mean = weight.mean(dim=1, keepdim=True).mean(dim=2,
+                                  keepdim=True).mean(dim=3, keepdim=True)
+        weight = weight - weight_mean
+        std = weight.view(weight.size(0), -1).std(dim=1).view(-1, 1, 1, 1) + 1e-5
+        weight = weight / std.expand_as(weight)
+        return F.conv2d(x, weight, self.bias, self.stride,
+                        self.padding, self.dilation, self.groups)
+
+
 class Bottleneck(nn.Module):
     expansion = 2
 
-    def __init__(self, inplanes, planes, activation, norm, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, activation, norm, conv, stride=1, downsample=None):
         super(Bottleneck, self).__init__()
 
         self.bn1 = norm(inplanes)
-        self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=True)
+        self.conv1 = conv(inplanes, planes, kernel_size=1, bias=True)
         self.bn2 = norm(planes)
-        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
+        self.conv2 = conv(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=True)
         self.bn3 = norm(planes)
-        self.conv3 = nn.Conv2d(planes, planes * 2, kernel_size=1, bias=True)
+        self.conv3 = conv(planes, planes * 2, kernel_size=1, bias=True)
         self.relu = activation
         self.downsample = downsample
         self.stride = stride
@@ -60,18 +79,19 @@ class Bottleneck(nn.Module):
 
 
 class Hourglass(nn.Module):
-    def __init__(self, block, num_blocks, planes, depth, activation, norm):
+    def __init__(self, block, num_blocks, planes, depth, activation, norm, conv):
         super(Hourglass, self).__init__()
         self.depth = depth
         self.block = block
         self.activation = activation
         self.norm = norm
+        self.conv = conv
         self.hg = self._make_hour_glass(block, num_blocks, planes, depth)
 
     def _make_residual(self, block, num_blocks, planes):
         layers = []
         for i in range(0, num_blocks):
-            layers.append(block(planes*block.expansion, planes, self.activation, self.norm))
+            layers.append(block(planes*block.expansion, planes, self.activation, self.norm, self.conv))
         return nn.Sequential(*layers)
 
     def _make_hour_glass(self, block, num_blocks, planes, depth):
@@ -105,7 +125,7 @@ class Hourglass(nn.Module):
 
 class HourglassNet(nn.Module):
     '''Hourglass model from Newell et al ECCV 2016'''
-    def __init__(self, block, num_stacks=2, num_blocks=4, num_classes=16, activation=None, norm_type=None):
+    def __init__(self, block, num_stacks=2, num_blocks=4, num_classes=16, activation=None, norm_type=None, use_weight_std=False):
         super(HourglassNet, self).__init__()
         
         print(activation)
@@ -123,11 +143,17 @@ class HourglassNet(nn.Module):
             self.norm = nn.InstanceNorm2d
         elif norm_type == 'group':
             self.norm = lambda num_channels: nn.GroupNorm(32, num_channels)
+            
+        print(f'Use weight standardization: {use_weight_std}')
+        if use_weight_std:
+            self.conv = Conv2d_WS
+        else:
+            self.conv = nn.Conv2d
 
         self.inplanes = 64
         self.num_feats = 128
         self.num_stacks = num_stacks
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
+        self.conv1 = self.conv(3, self.inplanes, kernel_size=7, stride=2, padding=3,
                                bias=True)
         self.bn1 = self.norm(self.inplanes)
             
@@ -140,7 +166,7 @@ class HourglassNet(nn.Module):
         ch = self.num_feats*block.expansion
         hg, res, fc, score, fc_, score_ = [], [], [], [], [], []
         for i in range(num_stacks):
-            hg.append(Hourglass(block, num_blocks, self.num_feats, 4, activation=self.relu, norm=self.norm))
+            hg.append(Hourglass(block, num_blocks, self.num_feats, 4, activation=self.relu, norm=self.norm, conv=self.conv))
             res.append(self._make_residual(block, self.num_feats, num_blocks))
             fc.append(self._make_fc(ch, ch))
             score.append(nn.Conv2d(ch, num_classes, kernel_size=1, bias=True))
@@ -163,7 +189,7 @@ class HourglassNet(nn.Module):
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, self.relu, self.norm, stride, downsample))
+        layers.append(block(self.inplanes, planes, self.relu, self.norm, self.conv, stride, downsample))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
             layers.append(block(self.inplanes, planes, self.relu, self.norm))
@@ -172,7 +198,7 @@ class HourglassNet(nn.Module):
 
     def _make_fc(self, inplanes, outplanes):
         bn = self.norm(inplanes)
-        conv = nn.Conv2d(inplanes, outplanes, kernel_size=1, bias=True)
+        conv = self.conv(inplanes, outplanes, kernel_size=1, bias=True)
         return nn.Sequential(
                 conv,
                 bn,
@@ -208,7 +234,8 @@ def hg(**kwargs):
     model = HourglassNet(Bottleneck, num_stacks=kwargs['num_stacks'], num_blocks=kwargs['num_blocks'],
                          num_classes=kwargs['num_classes'],
                          activation=kwargs['activation'],
-                         norm_type=kwargs['norm'])
+                         norm_type=kwargs['norm'],
+                         use_weight_std=kwargs['weight_std'])
     return model
 
 
