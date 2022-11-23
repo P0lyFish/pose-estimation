@@ -22,7 +22,7 @@ model_urls = {
 class Bottleneck(nn.Module):
     expansion = 2
 
-    def __init__(self, inplanes, planes, stride=1, downsample=None):
+    def __init__(self, inplanes, planes, activation, stride=1, downsample=None):
         super(Bottleneck, self).__init__()
 
         self.bn1 = nn.BatchNorm2d(inplanes)
@@ -32,7 +32,7 @@ class Bottleneck(nn.Module):
                                padding=1, bias=True)
         self.bn3 = nn.BatchNorm2d(planes)
         self.conv3 = nn.Conv2d(planes, planes * 2, kernel_size=1, bias=True)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = activation
         self.downsample = downsample
         self.stride = stride
 
@@ -60,16 +60,17 @@ class Bottleneck(nn.Module):
 
 
 class Hourglass(nn.Module):
-    def __init__(self, block, num_blocks, planes, depth):
+    def __init__(self, block, num_blocks, planes, depth, activation):
         super(Hourglass, self).__init__()
         self.depth = depth
         self.block = block
+        self.activation = activation
         self.hg = self._make_hour_glass(block, num_blocks, planes, depth)
 
     def _make_residual(self, block, num_blocks, planes):
         layers = []
         for i in range(0, num_blocks):
-            layers.append(block(planes*block.expansion, planes))
+            layers.append(block(planes*block.expansion, planes, self.activation))
         return nn.Sequential(*layers)
 
     def _make_hour_glass(self, block, num_blocks, planes, depth):
@@ -118,6 +119,8 @@ class HourglassNet(nn.Module):
             self.relu = nn.ReLU(inplace=True)
         elif activation == 'gelu':
             self.relu = nn.GELU()
+        elif activation == 'leakyrelu':
+            self.relu = nn.LeakyReLU()
         self.layer1 = self._make_residual(block, self.inplanes, 1)
         self.layer2 = self._make_residual(block, self.inplanes, 1)
         self.layer3 = self._make_residual(block, self.num_feats, 1)
@@ -127,7 +130,7 @@ class HourglassNet(nn.Module):
         ch = self.num_feats*block.expansion
         hg, res, fc, score, fc_, score_ = [], [], [], [], [], []
         for i in range(num_stacks):
-            hg.append(Hourglass(block, num_blocks, self.num_feats, 4))
+            hg.append(Hourglass(block, num_blocks, self.num_feats, 4, activation=self.relu))
             res.append(self._make_residual(block, self.num_feats, num_blocks))
             fc.append(self._make_fc(ch, ch))
             score.append(nn.Conv2d(ch, num_classes, kernel_size=1, bias=True))
@@ -150,10 +153,10 @@ class HourglassNet(nn.Module):
             )
 
         layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
+        layers.append(block(self.inplanes, planes, self.relu, stride, downsample))
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
-            layers.append(block(self.inplanes, planes))
+            layers.append(block(self.inplanes, planes, self.relu))
 
         return nn.Sequential(*layers)
 
