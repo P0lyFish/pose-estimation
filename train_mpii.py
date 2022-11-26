@@ -17,6 +17,8 @@ from stacked_hourglass.train import do_training_epoch, do_validation_epoch
 from stacked_hourglass.utils.logger import Logger
 from stacked_hourglass.utils.misc import save_checkpoint, adjust_learning_rate
 
+from LPN.model import get_lpn
+
 
 def get_optimizer_scheduler(my_model, opt_cfg, sched_cfg):
     for k, v in my_model.named_parameters():
@@ -75,7 +77,14 @@ def main(args):
     os.makedirs(osp.join(args.checkpoint, 'tensorrboard'), exist_ok=True)
     board = SummaryWriter(osp.join(args.checkpoint, "tensorboard"))
 
-    model = _hg(**cfg['model'])
+    if 'hg' in cfg['model']['arch']:
+        model = _hg(**cfg['model'])
+    if 'lpn' in cfg['model']['arch']:
+        model = get_lpn(cfg['model']['resnet_spec'], cfg['model']['use_gcb'])
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print("Total params: ", total_params)
+
     model = DataParallel(model).to(device)
 
     # Create optimizer and scheduler
