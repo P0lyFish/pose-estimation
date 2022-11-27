@@ -79,8 +79,10 @@ class Bottleneck(nn.Module):
 
 
 class Hourglass(nn.Module):
-    def __init__(self, block, num_blocks, planes, depth, activation, norm, conv):
+    def __init__(self, block, num_blocks, planes, depth, activation, norm, conv, compress_ratio):
         super(Hourglass, self).__init__()
+        depth = depth // compress_ratio
+
         self.depth = depth
         self.block = block
         self.activation = activation
@@ -125,7 +127,7 @@ class Hourglass(nn.Module):
 
 class HourglassNet(nn.Module):
     '''Hourglass model from Newell et al ECCV 2016'''
-    def __init__(self, block, num_stacks=2, num_blocks=4, num_classes=16, activation=None, norm_type=None, use_weight_std=False):
+    def __init__(self, block, num_stacks=2, num_blocks=4, num_classes=16, activation=None, norm_type=None, use_weight_std=False, compress_ratio=1):
         super(HourglassNet, self).__init__()
         
         print(activation)
@@ -166,7 +168,10 @@ class HourglassNet(nn.Module):
         ch = self.num_feats*block.expansion
         hg, res, fc, score, fc_, score_ = [], [], [], [], [], []
         for i in range(num_stacks):
-            hg.append(Hourglass(block, num_blocks, self.num_feats, 4, activation=self.relu, norm=self.norm, conv=self.conv))
+            if i == num_stacks - 1:
+                hg.append(Hourglass(block, num_blocks, self.num_feats, 4, activation=self.relu, norm=self.norm, conv=self.conv, compress_ratio=compress_ratio))
+            else:
+                hg.append(Hourglass(block, num_blocks, self.num_feats, 4, activation=self.relu, norm=self.norm, conv=self.conv, compress_ratio=1))
             res.append(self._make_residual(block, self.num_feats, num_blocks))
             fc.append(self._make_fc(ch, ch))
             score.append(nn.Conv2d(ch, num_classes, kernel_size=1, bias=True))
@@ -235,7 +240,8 @@ def hg(**kwargs):
                          num_classes=kwargs['num_classes'],
                          activation=kwargs['activation'],
                          norm_type=kwargs['norm'],
-                         use_weight_std=kwargs['weight_std'])
+                         use_weight_std=kwargs['weight_std'],
+                         compress_ratio=kwargs['compress_ratio'])
     return model
 
 
