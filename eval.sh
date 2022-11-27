@@ -1,9 +1,2 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Sun Nov  7 14:31:35 2021
-
-@author: mustansar
-"""
-
-python scripts/evaluate_mpii.py --arch=hg2 --image-path=/apps/local/shared/cv701/datasets/mpii_human_pose_v1/images/ --model-file checkpoint/hg2/checkpoint.pth.tar
+python evaluate_mpii.py --arch=hg2 --image-path=mpii_human_pose_v1/images/ --model-file checkpoint/baseline_adamw_ws_compress/model_best.pth.tar\
+                    --cfg configs/baseline_adamw_ws_compress2.yml
